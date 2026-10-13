@@ -1,9 +1,10 @@
 import typer
 from rich.console import Console
+
 from mubawab_scraper.config import settings
 from mubawab_scraper.logging_config import setup_logging
-from mubawab_scraper.pipeline.orchestrator import run_pipeline
 from mubawab_scraper.pipeline.orchestratior_ville import run_pipeline as run_pipeline_ville
+from mubawab_scraper.pipeline.orchestrator import run_pipeline
 
 app = typer.Typer(help="Mubawab scraping pipeline", no_args_is_help=True)
 console = Console()
@@ -11,11 +12,23 @@ console = Console()
 @app.command()
 def scrape(
     city: str = typer.Option(
-        "casablanca", help="Slug d'une ville, ou 'all' pour toutes les villes enregistrées"
+        "casablanca",
+        "--city",
+        "--ville",
+        help="Slug d'une ville, ou 'all' pour toutes les villes enregistrées",
     ),
-    property_type: str = typer.Option("appartements"),
+    property_type: str = typer.Option(
+        "all",
+        help=(
+            "Le motif /ct/ collecte tous les types de biens; "
+            "seule la valeur 'all' est prise en charge"
+        ),
+    ),
     transaction: str = typer.Option(
-        "a-vendre", help="a-vendre | a-louer | vacational"
+        "a-vendre",
+        "--transaction",
+        "--action",
+        help="a-vendre | a-louer | vacational | all",
     ),
     max_pages: int = typer.Option(
         settings.max_pages, help="Maximum pages per city; 0 scrapes every page"
@@ -30,13 +43,24 @@ def scrape(
             city, property_type, transaction, max_pages, headless
         )
         total_listings = sum(summary.listings_scraped for summary in summaries)
+        failed_actions = sum(summary.error is not None for summary in summaries)
         for summary in summaries:
+            if summary.error:
+                console.print(
+                    f"[red]Échec {summary.city} ({summary.action}) : "
+                    f"{summary.error}[/red]"
+                )
+                continue
             console.print(
-                f"[cyan]{summary.city}[/cyan] : "
+                f"[cyan]{summary.city}[/cyan] ({summary.action}) : "
                 f"{summary.pages_scraped}/{summary.total_pages} pages parcourues, "
                 f"{summary.listings_scraped}/{summary.total_results} annonces trouvées"
             )
         console.print(f"[green]✓ {total_listings} annonces enregistrées[/green]")
+        if failed_actions:
+            console.print(
+                f"[red]⚠ {failed_actions} action(s) de scraping en échec[/red]"
+            )
     elif orchestrator == "ville":
         villes = run_pipeline_ville(city, transaction, headless)
         console.print(f"[green]✓ {len(villes)} villes enregistrées[/green]")

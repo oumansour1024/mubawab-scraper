@@ -107,22 +107,36 @@ If the project contains a `config.py` or YAML configuration file, use that inste
 
 ## Running the scraper
 
-Run the main scraping job:
+Install this project and its dependencies:
 
 ```bash
-python src/main.py
+python -m pip install -e .
 ```
 
-If the project uses a Scrapy spider:
+First, register Mubawab city links from the footer:
 
 ```bash
-scrapy crawl mubawab
+python -m mubawab_scraper scrape --orchestrator ville --city casablanca
 ```
 
-To run a single test or debug job:
+Scrape one city, or every registered city. The `/ct/` route includes all
+property types, so use `--property-type all`. `--action` accepts one action or
+`all`; `--max-pages 0` scrapes every page:
 
 ```bash
-python -m src.scripts.debug
+python -m mubawab_scraper scrape --city kenitra --action a-vendre --max-pages 2
+python -m mubawab_scraper scrape --city all --action all --max-pages 0
+```
+
+The pipeline enriches listings, upserts them into SQLite, stores pagination
+metadata per city and action, and exports listing rows to
+`data/processed/mubawab_export.csv`. City links are exported separately to
+`data/processed/mubawab_villes.csv`.
+
+Export the stored listings again without scraping:
+
+```bash
+python -m mubawab_scraper export --fmt csv
 ```
 
 ## Data model
@@ -284,5 +298,3 @@ This project is distributed under the MIT License unless your organization uses 
 ## Summary
 
 This repository is intended to provide a complete and maintainable workflow for collecting Mubawab property listings, transforming them into analytics-ready data, and storing them in a structured database or data warehouse. With the right scheduling and validation layer, it can support long-term market monitoring and reporting.
-
-

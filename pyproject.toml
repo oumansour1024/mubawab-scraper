@@ -25,7 +25,7 @@ dependencies = [
 
 [project.scripts]
 mubawab-scraper = "mubawab_scraper:main"
-mubawab-scrape-cli = "mubawab_scraper.cli:app"
+mubawab-scraper-cli = "mubawab_scraper.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]

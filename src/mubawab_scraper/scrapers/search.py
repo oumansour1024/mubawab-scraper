@@ -1,15 +1,21 @@
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 from mubawab_scraper.browser.waits import wait_for_id
+from mubawab_scraper.logging_config import get_logger
 from mubawab_scraper.parsers.card_parser import parse_listing_card
 from mubawab_scraper.parsers.pagination_parser import parse_pagination
 from mubawab_scraper.utils.rate_limit import jittered_sleep
-from mubawab_scraper.logging_config import get_logger
+from mubawab_scraper.utils.retry import selenium_retry
 
 log = get_logger(__name__)
+
+
+@selenium_retry
+def _navigate_to_search_page(driver, url: str) -> None:
+    driver.get(url)
 
 
 @dataclass
@@ -30,7 +36,7 @@ def scrape_search_pages(
     total_results = 0
     pages_scraped = 0
 
-    driver.get(f"{base_url}:p:1")
+    _navigate_to_search_page(driver, f"{base_url}:p:1")
     try:
         wait_for_id(driver, "adList")
     except TimeoutException:
@@ -52,11 +58,19 @@ def scrape_search_pages(
         if page == 1:
             page_soup = soup
         else:
-            driver.get(f"{base_url}:p:{page}")
             try:
+                _navigate_to_search_page(driver, f"{base_url}:p:{page}")
                 wait_for_id(driver, "adList")
             except TimeoutException:
                 log.info("page_unavailable", page=page)
+                break
+            except WebDriverException as exc:
+                log.warning(
+                    "page_navigation_failed",
+                    page=page,
+                    err_type=type(exc).__name__,
+                    err=str(exc)[:200],
+                )
                 break
             page_soup = BeautifulSoup(driver.page_source, "lxml")
 

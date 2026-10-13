@@ -13,20 +13,28 @@ CT_ACTIONS = {
     "vacational": "immobilier-vacational-all",
 }
 
+ACTION_ALIASES = {
+    "a-vendre-all": "a-vendre",
+    "a-louer-all": "a-louer",
+    "vacational-all": "vacational",
+}
+
+
+def normalize_city_action(action: str) -> str:
+    action = action.strip().lower()
+    action = ACTION_ALIASES.get(action, action)
+    if action not in CT_ACTIONS:
+        valid_actions = [*CT_ACTIONS, *ACTION_ALIASES, "all"]
+        raise ValueError(f"Action inconnue: {action}. Valides: {valid_actions}")
+    return action
+
 
 def build_city_url(city_slug: str, action: str = "a-vendre") -> str:
     """
     Pattern /ct/ : page ville complète (tous types de biens).
     Ex: https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all
     """
-    action = {
-        "a-vendre-all": "a-vendre",
-        "a-louer-all": "a-louer",
-        "vacational-all": "vacational",
-    }.get(action, action)
+    action = normalize_city_action(action)
     slug = CT_ACTIONS.get(action)
-    if not slug:
-        raise ValueError(f"Action inconnue: {action}. Valides: {list(CT_ACTIONS)}")
     encoded_city_slug = quote(unquote(city_slug), safe="-")
     return f"{settings.base_url}/ct/{encoded_city_slug}/{slug}"
-

@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlparse
 
 from mubawab_scraper.models import Ville
 
@@ -34,14 +35,67 @@ class SQLiteStore:
                 )
 
     def save_many(self, listings: list[dict]) -> None:
+        ad_listings = [
+            listing
+            for listing in listings
+            if not self._is_city_url(listing.get("url"))
+        ]
         self.conn.executemany(
             """
-            INSERT OR IGNORE INTO listings
+            INSERT INTO listings
             (listing_id, title, price, price_per_sqm, area_sqm, rooms,
              bedrooms, bathrooms, property_type, transaction_type, city,
              neighbourhood, url, image_url, description, agency_name,
              latitude, longitude, amenities, is_promoted)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(url) DO UPDATE SET
+                listing_id = COALESCE(excluded.listing_id, listings.listing_id),
+                title = COALESCE(excluded.title, listings.title),
+                price = COALESCE(excluded.price, listings.price),
+                price_per_sqm = COALESCE(excluded.price_per_sqm, listings.price_per_sqm),
+                area_sqm = COALESCE(excluded.area_sqm, listings.area_sqm),
+                rooms = COALESCE(excluded.rooms, listings.rooms),
+                bedrooms = COALESCE(excluded.bedrooms, listings.bedrooms),
+                bathrooms = COALESCE(excluded.bathrooms, listings.bathrooms),
+                property_type = COALESCE(excluded.property_type, listings.property_type),
+                transaction_type = COALESCE(excluded.transaction_type, listings.transaction_type),
+                city = COALESCE(excluded.city, listings.city),
+                neighbourhood = COALESCE(excluded.neighbourhood, listings.neighbourhood),
+                image_url = COALESCE(excluded.image_url, listings.image_url),
+                description = COALESCE(excluded.description, listings.description),
+                agency_name = COALESCE(excluded.agency_name, listings.agency_name),
+                latitude = COALESCE(excluded.latitude, listings.latitude),
+                longitude = COALESCE(excluded.longitude, listings.longitude),
+                amenities = CASE
+                    WHEN excluded.amenities = '[]' THEN listings.amenities
+                    ELSE excluded.amenities
+                END,
+                is_promoted = excluded.is_promoted,
+                scraped_at = CURRENT_TIMESTAMP
+            ON CONFLICT(listing_id) DO UPDATE SET
+                url = COALESCE(excluded.url, listings.url),
+                title = COALESCE(excluded.title, listings.title),
+                price = COALESCE(excluded.price, listings.price),
+                price_per_sqm = COALESCE(excluded.price_per_sqm, listings.price_per_sqm),
+                area_sqm = COALESCE(excluded.area_sqm, listings.area_sqm),
+                rooms = COALESCE(excluded.rooms, listings.rooms),
+                bedrooms = COALESCE(excluded.bedrooms, listings.bedrooms),
+                bathrooms = COALESCE(excluded.bathrooms, listings.bathrooms),
+                property_type = COALESCE(excluded.property_type, listings.property_type),
+                transaction_type = COALESCE(excluded.transaction_type, listings.transaction_type),
+                city = COALESCE(excluded.city, listings.city),
+                neighbourhood = COALESCE(excluded.neighbourhood, listings.neighbourhood),
+                image_url = COALESCE(excluded.image_url, listings.image_url),
+                description = COALESCE(excluded.description, listings.description),
+                agency_name = COALESCE(excluded.agency_name, listings.agency_name),
+                latitude = COALESCE(excluded.latitude, listings.latitude),
+                longitude = COALESCE(excluded.longitude, listings.longitude),
+                amenities = CASE
+                    WHEN excluded.amenities = '[]' THEN listings.amenities
+                    ELSE excluded.amenities
+                END,
+                is_promoted = excluded.is_promoted,
+                scraped_at = CURRENT_TIMESTAMP
             """,
             [
                 (
@@ -66,10 +120,30 @@ class SQLiteStore:
                     json.dumps(listing.get("amenities", []), ensure_ascii=False),
                     listing.get("is_promoted", False),
                 )
-                for listing in listings
+                for listing in ad_listings
             ],
         )
         self.conn.commit()
+
+    @staticmethod
+    def _is_city_url(url: str | None) -> bool:
+        if not url:
+            return False
+        path_parts = [part for part in urlparse(url).path.split("/") if part]
+        return len(path_parts) >= 3 and path_parts[0:2] == ["fr", "t"]
+
+    def remove_city_urls_from_listings(self) -> int:
+        cursor = self.conn.execute(
+            """
+            DELETE FROM listings
+            WHERE url IS NOT NULL
+              AND listing_id IS NULL
+              AND title IS NULL
+              AND url LIKE '%/fr/t/%'
+            """
+        )
+        self.conn.commit()
+        return cursor.rowcount
 
     def save_villes(self, villes: list[Ville]) -> None:
         self.conn.executemany(

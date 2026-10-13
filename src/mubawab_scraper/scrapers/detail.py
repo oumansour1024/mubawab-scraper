@@ -5,20 +5,18 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import (
+    NoSuchWindowException,
     TimeoutException,
     WebDriverException,
-    NoSuchWindowException,
 )
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
-from mubawab_scraper.browser.waits import wait_for_selector
-from mubawab_scraper.config import settings
+from mubawab_scraper.logging_config import get_logger
 from mubawab_scraper.parsers.detail_parser import parse_detail
 from mubawab_scraper.utils.rate_limit import jittered_sleep
 from mubawab_scraper.utils.retry import selenium_retry
-from mubawab_scraper.logging_config import get_logger
 
 log = get_logger(__name__)
 
@@ -80,7 +78,7 @@ def _is_same_domain(url: str, base: str = "mubawab.ma") -> bool:
 
 def _is_listing_url(url: str) -> bool:
     """Vérifie que l'URL correspond bien à une annonce ou promotion."""
-    return "/fr/a/" in url or "/fr/p/" in url
+    return any(f"/fr/{kind}/" in url for kind in ("a", "pa", "p"))
 
 
 def _page_is_404(driver) -> bool:
@@ -105,7 +103,9 @@ def _load_detail_page(driver, url: str, timeout: int = 12) -> str:
     """
     driver.get(url)
     WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, DETAIL_READY_SELECTORS))
+        expected_conditions.presence_of_element_located(
+            (By.CSS_SELECTOR, DETAIL_READY_SELECTORS)
+        )
     )
     return driver.page_source
 

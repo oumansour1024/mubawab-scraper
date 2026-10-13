@@ -1,7 +1,9 @@
 def parse_detail(soup) -> dict:
     detail: dict = {}
 
-    desc = soup.select_one("div.propertyDescription, div.description")
+    desc = soup.select_one(
+        "div.propertyDescription, div.description, p.listingP.descLi"
+    )
     description_meta = soup.select_one("meta[name='description']")
     detail["description"] = (
         desc.get_text(" ", strip=True)
@@ -26,6 +28,8 @@ def parse_detail(soup) -> dict:
 
     detail["amenities"] = [
         el.get_text(strip=True)
-        for el in soup.select("ul.amenities li, div.features span")
+        for el in soup.select(
+            "ul.amenities li, div.features span, div.adFeature span.fSize11"
+        )
     ]
     return detail

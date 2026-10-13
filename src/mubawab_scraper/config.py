@@ -1,6 +1,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MUBAWAB_")
     base_url: str = "https://www.mubawab.ma/fr"
@@ -8,9 +9,14 @@ class Settings(BaseSettings):
     max_pages: int = Field(default=10, ge=1)
     min_delay: float = 1.5
     max_delay: float = 3.0
-    page_timeout: int = 15
-    db_path: str = "data/db/mubawab.db"
+    db_path: str = "data/db/mubawab1.db"
     export_dir: str = "data/processed"
+    export_dir: str = "exports"
+    log_dir: str = "logs"
     log_level: str = "INFO"
+    log_json: bool = False
+    log_rotation: str = "size"       # "size" ou "time"
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 7
 
 settings = Settings()
