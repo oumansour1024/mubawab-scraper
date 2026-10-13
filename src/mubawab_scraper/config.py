@@ -9,9 +9,8 @@ class Settings(BaseSettings):
     max_pages: int = Field(default=10, ge=1)
     min_delay: float = 1.5
     max_delay: float = 3.0
-    db_path: str = "data/db/mubawab1.db"
+    db_path: str = "data/db/mubawab.db"
     export_dir: str = "data/processed"
-    export_dir: str = "exports"
     log_dir: str = "logs"
     log_level: str = "INFO"
     log_json: bool = False

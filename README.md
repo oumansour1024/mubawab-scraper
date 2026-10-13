@@ -128,12 +128,27 @@ python -m mubawab_scraper scrape --city kenitra --action a-vendre --max-pages 2
 python -m mubawab_scraper scrape --city all --action all --max-pages 0
 ```
 
-The pipeline enriches listings, upserts them into SQLite, stores pagination
-metadata per city and action, and exports listing rows to
-`data/processed/mubawab_export.csv`. City links are exported separately to
-`data/processed/mubawab_villes.csv`.
+The default pipeline enriches listings, upserts them into SQLite, stores
+pagination metadata per city and action, and exports listing rows. City links
+are exported separately.
 
-Export the stored listings again without scraping:
+Use the raw HTTP orchestrator to keep card text unnormalized, for one city or
+all cities registered in the database, and one action or all actions:
+
+```bash
+python -m mubawab_scraper scrape --orchestrator brut --city agadir --action a-vendre --max-pages 2
+python -m mubawab_scraper scrape --orchestrator brut --city all --action all --max-pages 0
+```
+
+Raw listings are stored separately in the `raw_listings` SQLite table and
+automatically exported as CSV and JSON to `data/processed/`. Re-export them
+without scraping:
+
+```bash
+python -m mubawab_scraper export --raw --fmt csv
+```
+
+Export the stored normalized listings again without scraping:
 
 ```bash
 python -m mubawab_scraper export --fmt csv

@@ -122,6 +122,38 @@ def export(fmt: str = "csv", *, with_time: bool = True) -> str:
     return str(path)
 
 
+def export_raw(fmt: str = "csv", *, with_time: bool = True) -> str:
+    """Export raw, unnormalized listing-card records from SQLite."""
+    if fmt not in {"csv", "parquet", "json"}:
+        raise ValueError(f"Format non supporté: {fmt}")
+
+    out_dir = _dated_dir(Path(settings.export_dir), with_time=with_time)
+    df = _query("SELECT * FROM raw_listings ORDER BY city, transaction_type, ad_id")
+    path = out_dir / f"mubawab_raw_export_{out_dir.name}.{fmt}"
+
+    match fmt:
+        case "csv":
+            df.to_csv(path, index=False, encoding="utf-8-sig")
+        case "parquet":
+            df.to_parquet(path, index=False)
+        case "json":
+            df.to_json(path, orient="records", force_ascii=False, indent=2)
+
+    return str(path)
+
+
+def export_raw_bundle(*, with_time: bool = True) -> list[str]:
+    """Export raw listing records as both CSV and JSON using one timestamp."""
+    out_dir = _dated_dir(Path(settings.export_dir), with_time=with_time)
+    df = _query("SELECT * FROM raw_listings ORDER BY city, transaction_type, ad_id")
+    stamp = out_dir.name
+    csv_path = out_dir / f"mubawab_raw_export_{stamp}.csv"
+    json_path = out_dir / f"mubawab_raw_export_{stamp}.json"
+    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    df.to_json(json_path, orient="records", force_ascii=False, indent=2)
+    return [str(csv_path), str(json_path)]
+
+
 def export_villes(*, with_time: bool = True) -> str:
     """
     Exporte la table ``villes`` en CSV.
