@@ -1,7 +1,9 @@
 
+import json
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from threading import Event
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import (
@@ -13,9 +15,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 
+from mubawab_scraper.browser.waits import wait_for_selector
+from mubawab_scraper.config import settings
 from mubawab_scraper.logging_config import get_logger
-from mubawab_scraper.parsers.detail_parser import parse_detail
-from mubawab_scraper.utils.rate_limit import jittered_sleep
+from mubawab_scraper.models import PropertyDetail
+from mubawab_scraper.parsers.detail_parser import parse_detail, parse_detail_page
+from mubawab_scraper.utils.rate_limit import RequestRateLimiter, jittered_sleep
 from mubawab_scraper.utils.retry import selenium_retry
 
 log = get_logger(__name__)
@@ -29,6 +34,104 @@ DETAIL_READY_SELECTORS = (
     "h1.listingTit, "
     "meta[property='og:title']"
 )
+
+RAW_DETAIL_READY_SELECTORS = (
+    "h1.searchTitle, #fullPicturesHeader, div.adMainFeature, "
+    "div.blockProp, div.picturesGallery"
+)
+
+
+class RateLimitedPageError(RuntimeError):
+    def __init__(self, url: str, retry_after: str | None = None) -> None:
+        self.url = url
+        self.retry_after = retry_after
+        super().__init__(f"HTTP 429 received for {url}")
+
+
+def _read_rate_limit_response(driver, url: str) -> tuple[bool, str | None]:
+    for entry in driver.get_log("performance"):
+        try:
+            event = json.loads(entry["message"])["message"]
+            if event.get("method") != "Network.responseReceived":
+                continue
+            response = event["params"]["response"]
+            if response.get("status") != 429 or response.get("url") != url:
+                continue
+            headers = {
+                str(name).casefold(): str(value)
+                for name, value in response.get("headers", {}).items()
+            }
+            return True, headers.get("retry-after")
+        except (KeyError, TypeError, json.JSONDecodeError):
+            continue
+    return False, None
+
+
+def build_raw_detail_url(url: str, ad_id: str) -> str:
+    """Resolve card links to a Mubawab detail URL."""
+    site_root = f"{urlparse(settings.base_url).scheme}://{urlparse(settings.base_url).netloc}/"
+    candidate = url.strip()
+    if not candidate:
+        candidate = f"/fr/a/{ad_id}"
+    parsed = urlparse(candidate)
+    if parsed.scheme and parsed.netloc:
+        if parsed.netloc.casefold() not in {
+            "mubawab.ma",
+            "www.mubawab.ma",
+        }:
+            raise ValueError(f"Unexpected listing domain: {parsed.netloc}")
+        return candidate
+    if candidate.startswith("/a/"):
+        candidate = f"/fr{candidate}"
+    return urljoin(site_root, candidate)
+
+
+@selenium_retry
+def _navigate_raw_detail(driver, url: str) -> None:
+    driver.get(url)
+
+
+def scrape_detail(
+    driver,
+    url: str,
+    ad_id: str,
+    rate_limiter: RequestRateLimiter | None = None,
+    stop_event: Event | None = None,
+) -> PropertyDetail | None:
+    """Load and parse one listing detail page without normalizing its fields."""
+    detail_url = url
+    try:
+        detail_url = build_raw_detail_url(url, ad_id)
+        if rate_limiter is not None:
+            if not rate_limiter.wait(stop_event):
+                return None
+        else:
+            jittered_sleep()
+        if stop_event is not None and stop_event.is_set():
+            return None
+        driver.get_log("performance")
+        _navigate_raw_detail(driver, detail_url)
+        rate_limited, retry_after = _read_rate_limit_response(driver, detail_url)
+        page_text = driver.page_source[:2000].casefold()
+        if (
+            rate_limited
+            or "too many requests" in page_text
+            or "trop de requêtes" in page_text
+        ):
+            raise RateLimitedPageError(detail_url, retry_after)
+        wait_for_selector(driver, RAW_DETAIL_READY_SELECTORS, timeout=10)
+        detail = parse_detail_page(driver.page_source, ad_id, detail_url)
+    except RateLimitedPageError:
+        raise
+    except (TimeoutException, WebDriverException, ValueError) as exc:
+        log.warning(
+            "raw_detail_scrape_failed",
+            ad_id=ad_id,
+            url=detail_url,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        detail = None
+    return detail
 
 
 class EnrichStats:

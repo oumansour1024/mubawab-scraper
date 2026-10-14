@@ -1,7 +1,10 @@
 """HTTP search scraper that preserves the original listing-card text."""
 
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from itertools import count
 
 import requests
@@ -18,6 +21,7 @@ from mubawab_scraper.utils.urls import build_city_url
 log = get_logger(__name__)
 
 REQUEST_TIMEOUT = 20
+MAX_RATE_LIMIT_RETRIES = 3
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -35,14 +39,67 @@ class RawSearchResult:
     error: str | None = None
 
 
-def fetch(url: str) -> str:
+def _rate_limit_delay(retry_after: str | None, attempt: int) -> float:
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                return max(
+                    0.0,
+                    (retry_at - datetime.now(UTC)).total_seconds(),
+                )
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return float(min(5 * (2**attempt), 60))
+
+
+def fetch(url: str, session: requests.Session | None = None) -> str:
+    owns_session = session is None
+    client = session or requests.Session()
     try:
-        response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as exc:
-        log.warning("raw_fetch_failed", url=url, error=str(exc))
-        raise
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                response = client.get(
+                    url,
+                    headers=HEADERS,
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except requests.RequestException as exc:
+                log.warning("raw_fetch_failed", url=url, error=str(exc))
+                raise
+
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response.text
+            if attempt == MAX_RATE_LIMIT_RETRIES:
+                log.error(
+                    "raw_rate_limit_retries_exhausted",
+                    url=url,
+                    attempts=attempt + 1,
+                    retry_after=response.headers.get("Retry-After"),
+                )
+                response.raise_for_status()
+
+            delay = _rate_limit_delay(
+                response.headers.get("Retry-After"),
+                attempt,
+            )
+            log.warning(
+                "raw_rate_limited",
+                url=url,
+                retry=attempt + 1,
+                retry_after=response.headers.get("Retry-After"),
+                wait_seconds=delay,
+            )
+            time.sleep(delay)
+        raise RuntimeError("Rate-limit retry loop exited unexpectedly")
+    finally:
+        if owns_session:
+            client.close()
 
 
 def build_page_url(base_url: str, page: int) -> str:
@@ -75,11 +132,11 @@ def scrape_search_pages(
 
     error = None
     discovered_total_pages = 0
-    with progress:
+    with requests.Session() as session, progress:
         for page in progress:
             url = build_page_url(base_url, page)
             try:
-                html = fetch(url)
+                html = fetch(url, session=session)
             except requests.RequestException as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 log.error(
@@ -126,9 +183,11 @@ def scrape_search_pages(
                 listings=len(rows),
                 total=len(listings),
             )
-            if page_limit == 0 or page < page_limit:
-                if not discovered_total_pages or page < discovered_total_pages:
-                    jittered_sleep()
+            if (
+                (page_limit == 0 or page < page_limit)
+                and (not discovered_total_pages or page < discovered_total_pages)
+            ):
+                jittered_sleep()
             if discovered_total_pages and page >= discovered_total_pages:
                 break
 

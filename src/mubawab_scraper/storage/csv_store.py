@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import datetime, timezone
+import json
 import sqlite3
 from pathlib import Path
 
@@ -152,6 +153,42 @@ def export_raw_bundle(*, with_time: bool = True) -> list[str]:
     df.to_csv(csv_path, index=False, encoding="utf-8-sig")
     df.to_json(json_path, orient="records", force_ascii=False, indent=2)
     return [str(csv_path), str(json_path)]
+
+
+def export_raw_details(
+    fmt: str = "csv",
+    *,
+    with_time: bool = True,
+) -> list[str]:
+    """Export raw listing cards and their detail records."""
+    if fmt not in {"csv", "parquet", "json"}:
+        raise ValueError(f"Format non supporté: {fmt}")
+
+    out_dir = _dated_dir(Path(settings.export_dir), with_time=with_time)
+    listings = _query(
+        "SELECT * FROM raw_listings ORDER BY city, transaction_type, ad_id"
+    )
+    details = _query("SELECT * FROM raw_listing_details ORDER BY ad_id")
+    stamp = out_dir.name
+
+    if fmt == "json":
+        path = out_dir / f"mubawab_raw_details_export_{stamp}.json"
+        payload = {
+            "raw_listings": listings.to_dict(orient="records"),
+            "raw_listing_details": details.to_dict(orient="records"),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return [str(path)]
+
+    listings_path = out_dir / f"raw_listings_{stamp}.{fmt}"
+    details_path = out_dir / f"raw_listing_details_{stamp}.{fmt}"
+    if fmt == "csv":
+        listings.to_csv(listings_path, index=False, encoding="utf-8-sig")
+        details.to_csv(details_path, index=False, encoding="utf-8-sig")
+    else:
+        listings.to_parquet(listings_path, index=False)
+        details.to_parquet(details_path, index=False)
+    return [str(listings_path), str(details_path)]
 
 
 def export_villes(*, with_time: bool = True) -> str:

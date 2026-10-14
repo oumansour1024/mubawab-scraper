@@ -94,11 +94,89 @@ def scrape(
 def export(
     fmt: str = typer.Option("csv", help="csv | parquet | json"),
     raw: bool = typer.Option(False, "--raw", help="Exporter les annonces brutes"),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Exporter les annonces brutes avec leurs pages détail",
+    ),
 ) -> None:
     """Exporte la base vers un fichier plat."""
-    from mubawab_scraper.storage.csv_store import export as _export, export_raw
-    path = export_raw(fmt=fmt) if raw else _export(fmt=fmt)
-    console.print(f"[green]✓ Export → {path}[/green]")
+    from mubawab_scraper.storage.csv_store import (
+        export as _export,
+    )
+    from mubawab_scraper.storage.csv_store import (
+        export_raw,
+        export_raw_details,
+    )
+    if details:
+        paths = export_raw_details(fmt=fmt)
+    elif raw:
+        paths = [export_raw(fmt=fmt)]
+    else:
+        paths = [_export(fmt=fmt)]
+    console.print(f"[green]✓ Export → {', '.join(paths)}[/green]")
+
+
+@app.command()
+def initdb() -> None:
+    """Initialise ou migre les tables SQLite du pipeline brut."""
+    from mubawab_scraper.storage.raw_store import RawListingStore
+    from mubawab_scraper.storage.sqlite_store import SQLiteStore
+
+    setup_logging(settings.log_level)
+    normalized_store = SQLiteStore(settings.db_path)
+    normalized_store.close()
+    raw_store = RawListingStore(settings.db_path)
+    raw_store.close()
+    console.print(f"[green]✓ DB initialisée → {settings.db_path}[/green]")
+
+
+@app.command()
+def details(
+    transaction: str = typer.Option(
+        "all",
+        "--transaction",
+        "--action",
+        help="a-vendre | a-louer | vacational | all",
+    ),
+    city: str = typer.Option(
+        "all",
+        "--city",
+        "--ville",
+        help="Ville ou all",
+    ),
+    limit: int = typer.Option(0, help="Nombre maximal d'URLs; 0 = toutes"),
+    headless: bool = typer.Option(settings.headless),
+    workers: int = typer.Option(
+        1,
+        min=1,
+        max=2,
+        help="Nombre de navigateurs parallèles (1 ou 2; limite prudente)",
+    ),
+) -> None:
+    """Scrape les pages détail des annonces brutes non encore traitées."""
+    from mubawab_scraper.pipeline.detail_pipeline import run_detail_pipeline
+
+    setup_logging(settings.log_level)
+    summary = run_detail_pipeline(
+        transaction_type=transaction,
+        city=city,
+        limit=limit,
+        headless=headless,
+        workers=workers,
+    )
+    rate_limit_status = "non"
+    if summary.rate_limited:
+        rate_limit_status = "oui"
+        if summary.retry_after:
+            rate_limit_status += f" (Retry-After: {summary.retry_after})"
+    console.print(
+        f"[cyan]URLs trouvées :[/cyan] {summary.urls_found}\n"
+        f"[green]Détails scrapés :[/green] {summary.details_scraped}\n"
+        f"[red]Échecs :[/red] {summary.details_failed}\n"
+        f"[yellow]Limitation HTTP 429 :[/yellow] {rate_limit_status}\n"
+        f"[yellow]Durée :[/yellow] {summary.duration_sec:.1f}s"
+    )
 
 if __name__ == "__main__":
     app()

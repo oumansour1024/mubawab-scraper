@@ -148,6 +148,28 @@ without scraping:
 python -m mubawab_scraper export --raw --fmt csv
 ```
 
+Scrape detail pages for listing records that have not been processed yet:
+
+```bash
+python -m mubawab_scraper initdb
+python -m mubawab_scraper details --transaction all --city all --limit 0 --workers 2
+python -m mubawab_scraper export --details --fmt csv
+```
+
+Successful detail records are stored in `raw_listing_details`, and their
+source cards are marked `detail_scraped=1`. Failed cards remain eligible for
+retry. Detail exports include separate files for raw cards and detail records.
+Detail pages are loaded with Selenium's eager page-load strategy and committed
+to SQLite as workers finish, while still marking each successful record for
+resume. Detail scraping defaults to one worker and supports a maximum of two;
+both workers share a request-rate limiter. On the first detected HTTP 429,
+workers stop starting new pages, preserve completed results, and leave
+unprocessed listings eligible for a later retry. The CLI reports the
+`Retry-After` value when provided. HTTP 429 responses from the raw listing
+scraper honor `Retry-After` (including HTTP-date values), otherwise use a
+bounded exponential wait; after the retry limit the run records the error and
+stops that city/action.
+
 Export the stored normalized listings again without scraping:
 
 ```bash
