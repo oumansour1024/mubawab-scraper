@@ -137,8 +137,11 @@ all cities registered in the database, and one action or all actions:
 
 ```bash
 python -m mubawab_scraper scrape --orchestrator brut --city agadir --action a-vendre --max-pages 2
-python -m mubawab_scraper scrape --orchestrator brut --city all --action all --max-pages 0
+python -m mubawab_scraper scrape --orchestrator brut --city all --action all --max-pages 0 --workers 2
 ```
+
+The raw orchestrator accepts `--workers 1` or `--workers 2` to scrape city/action
+jobs concurrently. Requests share a rate limiter; the default is one worker.
 
 Raw listings are stored separately in the `raw_listings` SQLite table and
 automatically exported as CSV and JSON to `data/processed/`. Re-export them

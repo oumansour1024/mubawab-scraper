@@ -15,7 +15,7 @@ from mubawab_scraper.config import settings
 from mubawab_scraper.logging_config import get_logger
 from mubawab_scraper.parsers.card_parser_brut import parse_page
 from mubawab_scraper.parsers.pagination_parser import parse_pagination
-from mubawab_scraper.utils.rate_limit import jittered_sleep
+from mubawab_scraper.utils.rate_limit import RequestRateLimiter, jittered_sleep
 from mubawab_scraper.utils.urls import build_city_url
 
 log = get_logger(__name__)
@@ -57,12 +57,18 @@ def _rate_limit_delay(retry_after: str | None, attempt: int) -> float:
     return float(min(5 * (2**attempt), 60))
 
 
-def fetch(url: str, session: requests.Session | None = None) -> str:
+def fetch(
+    url: str,
+    session: requests.Session | None = None,
+    rate_limiter: RequestRateLimiter | None = None,
+) -> str:
     owns_session = session is None
     client = session or requests.Session()
     try:
         for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
             try:
+                if rate_limiter is not None:
+                    rate_limiter.wait()
                 response = client.get(
                     url,
                     headers=HEADERS,
@@ -114,6 +120,7 @@ def scrape_search_pages(
     city_slug: str,
     transaction_type: str,
     max_pages: int | None = None,
+    rate_limiter: RequestRateLimiter | None = None,
 ) -> RawSearchResult:
     """Scrape raw listings for a city/action; zero pages means no page limit."""
     page_limit = settings.max_pages if max_pages is None else max_pages
@@ -128,6 +135,7 @@ def scrape_search_pages(
         page_numbers,
         total=page_limit if page_limit > 0 else None,
         desc=f"[{city_slug}:{transaction_type}]",
+        disable=rate_limiter is not None,
     )
 
     error = None
@@ -136,7 +144,7 @@ def scrape_search_pages(
         for page in progress:
             url = build_page_url(base_url, page)
             try:
-                html = fetch(url, session=session)
+                html = fetch(url, session=session, rate_limiter=rate_limiter)
             except requests.RequestException as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 log.error(
@@ -157,7 +165,10 @@ def scrape_search_pages(
                 break
 
             if page == 1 and page_limit == 0:
-                pagination = parse_pagination(BeautifulSoup(html, "lxml"), base_url)
+                pagination = parse_pagination(
+                    BeautifulSoup(html, "html.parser"),
+                    base_url,
+                )
                 discovered_total_pages = pagination.total_pages if pagination else 0
                 if discovered_total_pages:
                     progress.total = discovered_total_pages
@@ -183,7 +194,7 @@ def scrape_search_pages(
                 listings=len(rows),
                 total=len(listings),
             )
-            if (
+            if rate_limiter is None and (
                 (page_limit == 0 or page < page_limit)
                 and (not discovered_total_pages or page < discovered_total_pages)
             ):

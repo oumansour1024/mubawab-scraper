@@ -1,10 +1,12 @@
 import json
 import sqlite3
 from pathlib import Path
+from threading import Barrier, BrokenBarrierError
 
 from mubawab_scraper.models import PropertyDetail
 from mubawab_scraper.parsers.card_parser_brut import parse_page
 from mubawab_scraper.parsers.detail_parser import parse_detail_page
+from mubawab_scraper.pipeline import orchestrator_brut
 from mubawab_scraper.pipeline.orchestrator_brut import (
     _normalize_action,
     _resolve_cities,
@@ -14,9 +16,14 @@ from mubawab_scraper.scrapers.detail import (
     _read_rate_limit_response,
     build_raw_detail_url,
 )
-from mubawab_scraper.scrapers.search_brut import build_page_url, scrape_search_pages
+from mubawab_scraper.scrapers.search_brut import (
+    RawSearchResult,
+    build_page_url,
+    scrape_search_pages,
+)
 from mubawab_scraper.storage.csv_store import export_raw, export_raw_details
 from mubawab_scraper.storage.raw_store import RawListingStore
+from mubawab_scraper.utils.rate_limit import RequestRateLimiter
 
 LISTING_HTML = """
 <div class="listingBox premium" linkref="/ad/123">
@@ -90,10 +97,119 @@ def test_parse_page_keeps_raw_fields_and_city_context() -> None:
     ]
 
 
+def test_parse_page_handles_xml_declaration_as_html() -> None:
+    rows = parse_page(
+        '<?xml version="1.0" encoding="UTF-8"?>' + LISTING_HTML,
+        transaction_type="a-vendre",
+        city="agadir",
+        source_url="https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["ad_id"] == "123"
+
+
 def test_build_page_url_uses_mubawab_page_route() -> None:
     assert build_page_url(
         "https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all", 2
     ) == "https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all:p:2"
+
+
+def test_raw_pipeline_scrapes_city_jobs_concurrently(monkeypatch) -> None:
+    barrier = Barrier(2)
+    scraped_cities = []
+    persisted = []
+
+    class FakeCityStore:
+        def __init__(self, _path: str) -> None:
+            pass
+
+        def get_all_villes(self) -> list[dict[str, str]]:
+            return [
+                {"name": "Agadir", "attrNameurl": "agadir"},
+                {"name": "Rabat", "attrNameurl": "rabat"},
+            ]
+
+        def close(self) -> None:
+            pass
+
+    class FakeRawStore:
+        def __init__(self, _path: str) -> None:
+            pass
+
+        def save_many(self, rows) -> None:
+            persisted.extend(rows)
+
+        def close(self) -> None:
+            pass
+
+    def fake_scrape_search_pages(
+        city_slug: str,
+        transaction_type: str,
+        max_pages: int | None,
+        rate_limiter,
+    ) -> RawSearchResult:
+        assert transaction_type == "a-vendre"
+        assert max_pages == 1
+        assert rate_limiter is not None
+        try:
+            barrier.wait(timeout=2)
+        except BrokenBarrierError as exc:
+            raise AssertionError("city jobs were not started concurrently") from exc
+        scraped_cities.append(city_slug)
+        return RawSearchResult(
+            listings=[{"ad_id": city_slug}],
+            pages_scraped=1,
+        )
+
+    monkeypatch.setattr(orchestrator_brut, "SQLiteStore", FakeCityStore)
+    monkeypatch.setattr(orchestrator_brut, "RawListingStore", FakeRawStore)
+    monkeypatch.setattr(orchestrator_brut, "scrape_search_pages", fake_scrape_search_pages)
+    monkeypatch.setattr(orchestrator_brut, "export_raw_bundle", lambda: [])
+
+    summaries = orchestrator_brut.run_pipeline(
+        "all",
+        "a-vendre",
+        max_pages=1,
+        workers=2,
+    )
+
+    assert set(scraped_cities) == {"agadir", "rabat"}
+    assert {summary.city for summary in summaries} == {"Agadir", "Rabat"}
+    assert {row["city"] for row in persisted} == {"Agadir", "Rabat"}
+
+
+def test_scrape_cli_accepts_workers_for_raw_orchestrator(monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from mubawab_scraper import cli
+
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "run_pipeline_brut",
+        lambda city, action, max_pages, workers: calls.append(workers) or [],
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "scrape",
+            "--orchestrator",
+            "brut",
+            "--city",
+            "agadir",
+            "--action",
+            "a-vendre",
+            "--max-pages",
+            "1",
+            "--workers",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [2]
 
 
 def test_fetch_respects_retry_after_on_http_429(monkeypatch) -> None:
@@ -150,6 +266,27 @@ def test_unlimited_search_visits_each_page_until_no_listings(monkeypatch) -> Non
         "https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all:p:2",
         "https://www.mubawab.ma/fr/ct/agadir/immobilier-a-vendre-all:p:3",
     ]
+
+
+def test_parallel_search_disables_conflicting_progress_bar(monkeypatch) -> None:
+    progress_settings = []
+    original_tqdm = search_brut.tqdm
+
+    def capture_tqdm(*args, **kwargs):
+        progress_settings.append(kwargs)
+        return original_tqdm(*args, **kwargs)
+
+    monkeypatch.setattr(search_brut, "tqdm", capture_tqdm)
+    monkeypatch.setattr(search_brut, "fetch", lambda *_args, **_kwargs: LISTING_HTML)
+
+    scrape_search_pages(
+        "agadir",
+        "a-vendre",
+        max_pages=1,
+        rate_limiter=RequestRateLimiter(min_s=0, max_s=0),
+    )
+
+    assert progress_settings[0]["disable"] is True
 
 
 def test_raw_store_upserts_by_city_action_and_ad_id(tmp_path: Path) -> None:

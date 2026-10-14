@@ -6,6 +6,7 @@ from mubawab_scraper.logging_config import setup_logging
 from mubawab_scraper.pipeline.orchestratior_ville import run_pipeline as run_pipeline_ville
 from mubawab_scraper.pipeline.orchestrator import run_pipeline
 from mubawab_scraper.pipeline.orchestrator_brut import (
+    MAX_RAW_WORKERS,
     run_pipeline as run_pipeline_brut,
 )
 
@@ -40,10 +41,21 @@ def scrape(
     orchestrator: str = typer.Option(
         "default", help="default | ville | brut (scraping HTTP sans normalisation)"
     ),
+    workers: int = typer.Option(
+        1,
+        min=1,
+        max=MAX_RAW_WORKERS,
+        help="Nombre de tâches ville/action parallèles pour l'orchestrateur brut",
+    ),
 ) -> None:
     """Lance le pipeline complet."""
     setup_logging(settings.log_level)
     if orchestrator == "default":
+        if workers != 1:
+            raise typer.BadParameter(
+                "--workers > 1 est uniquement pris en charge avec "
+                "--orchestrator brut"
+            )
         summaries = run_pipeline(
             city, property_type, transaction, max_pages, headless
         )
@@ -67,10 +79,15 @@ def scrape(
                 f"[red]⚠ {failed_actions} action(s) de scraping en échec[/red]"
             )
     elif orchestrator == "ville":
+        if workers != 1:
+            raise typer.BadParameter(
+                "--workers > 1 est uniquement pris en charge avec "
+                "--orchestrator brut"
+            )
         villes = run_pipeline_ville(city, transaction, headless)
         console.print(f"[green]✓ {len(villes)} villes enregistrées[/green]")
     elif orchestrator == "brut":
-        summaries = run_pipeline_brut(city, transaction, max_pages)
+        summaries = run_pipeline_brut(city, transaction, max_pages, workers=workers)
         total_listings = sum(summary.listings_scraped for summary in summaries)
         for summary in summaries:
             if summary.error:

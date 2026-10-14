@@ -65,7 +65,7 @@ def parse_page(
     source_url: str,
 ) -> list[dict[str, str | bool]]:
     """Return raw records for valid listing cards found on a page."""
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, "html.parser")
     rows: list[dict[str, str | bool]] = []
     for box in soup.select("div.listingBox"):
         try:
