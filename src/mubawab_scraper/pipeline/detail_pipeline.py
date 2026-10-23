@@ -19,7 +19,7 @@ from mubawab_scraper.utils.rate_limit import RequestRateLimiter
 from mubawab_scraper.utils.urls import ACTION_ALIASES
 
 log = get_logger(__name__)
-MAX_DETAIL_WORKERS = 2
+MAX_DETAIL_WORKERS = 4
 DETAIL_DB_BATCH_SIZE = 20
 
 DETAIL_ACTION_ALIASES = {

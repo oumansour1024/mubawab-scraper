@@ -81,11 +81,40 @@ def _resolve_cities(
     return [(city, city)]
 
 
+def _resolve_city_range(
+    city_range: str,
+    registered_cities: list[dict[str, str | None]],
+) -> list[tuple[str, str]]:
+    parts = city_range.split(";")
+    if len(parts) != 2 or not parts[0].strip():
+        raise ValueError("city_range doit suivre le format 'VilleDépart;VilleFin'")
+
+    city_targets = _resolve_cities("all", registered_cities)
+
+    def find_city_index(name: str) -> int:
+        for index, (city_name, city_slug) in enumerate(city_targets):
+            if name.casefold() in {city_name.casefold(), city_slug.casefold()}:
+                return index
+        raise ValueError(f"Ville non enregistrée dans la plage: {name}")
+
+    start_index = find_city_index(parts[0].strip())
+    end_index = (
+        find_city_index(parts[1].strip())
+        if parts[1].strip()
+        else len(city_targets) - 1
+    )
+    if end_index < start_index:
+        raise ValueError("La ville de fin doit suivre la ville de départ")
+    return city_targets[start_index : end_index + 1]
+
+
 def run_pipeline(
     city: str,
     transaction: str,
     max_pages: int | None = None,
     workers: int = 1,
+    city_range: str | None = None,
+    page_range: tuple[int, int] | None = None,
 ) -> list[RawScrapeSummary]:
     """Scrape one/all cities and one/all actions into the raw listings table."""
     if not 1 <= workers <= MAX_RAW_WORKERS:
@@ -93,7 +122,12 @@ def run_pipeline(
 
     city_store = SQLiteStore(settings.db_path)
     try:
-        city_targets = _resolve_cities(city, city_store.get_all_villes())
+        registered_cities = city_store.get_all_villes()
+        city_targets = (
+            _resolve_city_range(city_range, registered_cities)
+            if city_range is not None
+            else _resolve_cities(city, registered_cities)
+        )
     finally:
         city_store.close()
 
@@ -116,12 +150,21 @@ def run_pipeline(
             target: tuple[str, str, str],
         ) -> tuple[str, str, RawSearchResult]:
             city_name, city_slug, action = target
-            result = scrape_search_pages(
-                city_slug=city_slug,
-                transaction_type=action,
-                max_pages=max_pages,
-                rate_limiter=rate_limiter,
-            )
+            if page_range is not None:
+                result = scrape_search_pages(
+                    city_slug=city_slug,
+                    transaction_type=action,
+                    max_pages=max_pages,
+                    rate_limiter=rate_limiter,
+                    page_range=page_range,
+                )
+            else:
+                result = scrape_search_pages(
+                    city_slug=city_slug,
+                    transaction_type=action,
+                    max_pages=max_pages,
+                    rate_limiter=rate_limiter,
+                )
             return city_name, action, result
 
         log.info(
@@ -129,6 +172,8 @@ def run_pipeline(
             cities=len(city_targets),
             actions=actions,
             max_pages=settings.max_pages if max_pages is None else max_pages,
+            city_range=city_range,
+            page_range=page_range,
             workers=workers,
         )
         if workers == 1:

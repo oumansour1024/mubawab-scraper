@@ -148,9 +148,11 @@ def test_raw_pipeline_scrapes_city_jobs_concurrently(monkeypatch) -> None:
         transaction_type: str,
         max_pages: int | None,
         rate_limiter,
+        page_range: tuple[int, int] | None = None,
     ) -> RawSearchResult:
         assert transaction_type == "a-vendre"
         assert max_pages == 1
+        assert page_range is None
         assert rate_limiter is not None
         try:
             barrier.wait(timeout=2)
@@ -210,6 +212,86 @@ def test_scrape_cli_accepts_workers_for_raw_orchestrator(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert calls == [2]
+
+
+def test_scrape_cli_passes_city_and_page_ranges_to_raw_pipeline(monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from mubawab_scraper import cli
+
+    calls = []
+
+    def fake_pipeline(
+        city: str,
+        action: str,
+        max_pages: int,
+        workers: int,
+        city_range: str | None = None,
+        page_range: tuple[int, int] | None = None,
+    ) -> list[orchestrator_brut.RawScrapeSummary]:
+        calls.append((city, action, max_pages, workers, city_range, page_range))
+        return []
+
+    monkeypatch.setattr(cli, "run_pipeline_brut", fake_pipeline)
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "scrape",
+            "--orchestrator",
+            "brut",
+            "--city-range",
+            "Casablanca;",
+            "--page-range",
+            "v1:5",
+            "--action",
+            "a-vendre",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        ("casablanca", "a-vendre", 0, 1, "Casablanca;", (1, 5))
+    ]
+
+
+def test_raw_search_scrapes_inclusive_page_range(monkeypatch) -> None:
+    visited_urls = []
+
+    def fake_fetch(url: str, session=None, rate_limiter=None) -> str:
+        visited_urls.append(url)
+        return LISTING_HTML
+
+    monkeypatch.setattr(search_brut, "fetch", fake_fetch)
+    monkeypatch.setattr(search_brut, "jittered_sleep", lambda: None)
+
+    result = scrape_search_pages(
+        "agadir",
+        "a-vendre",
+        page_range=(2, 4),
+    )
+
+    assert result.pages_scraped == 3
+    assert [url.rsplit(":p:", 1)[-1] for url in visited_urls] == ["2", "3", "4"]
+
+
+def test_resolve_city_range_starts_at_city_and_runs_to_end() -> None:
+    cities = [
+        {"name": "Casablanca", "attrNameurl": "casablanca"},
+        {"name": "Fès", "attrNameurl": "fes"},
+        {"name": "Marrakech", "attrNameurl": "marrakech"},
+        {"name": "Rabat", "attrNameurl": "rabat"},
+    ]
+
+    assert orchestrator_brut._resolve_city_range("casablanca;", cities) == [
+        ("Casablanca", "casablanca"),
+        ("Fès", "fes"),
+        ("Marrakech", "marrakech"),
+        ("Rabat", "rabat"),
+    ]
+    assert orchestrator_brut._resolve_city_range("Fès;Marrakech", cities) == [
+        ("Fès", "fes"),
+        ("Marrakech", "marrakech"),
+    ]
 
 
 def test_fetch_respects_retry_after_on_http_429(monkeypatch) -> None:
@@ -526,7 +608,41 @@ def test_export_raw_details_writes_both_data_sets(
 
     assert len(paths) == 2
     assert all(path.exists() for path in paths)
+    assert paths[0].name.startswith("raw_listings_")
+    assert paths[1].name.startswith("raw_listing_details_")
     assert "title_full" in paths[1].read_text(encoding="utf-8-sig")
+
+
+def test_export_raw_details_json_keeps_combined_and_detail_only_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from mubawab_scraper.config import settings
+
+    db_path = tmp_path / "details-json.db"
+    store = RawListingStore(str(db_path))
+    try:
+        store.save_detail(
+            parse_detail_page(
+                DETAIL_HTML,
+                "123",
+                "https://www.mubawab.ma/fr/a/123/example",
+            )
+        )
+    finally:
+        store.close()
+
+    monkeypatch.setattr(settings, "db_path", str(db_path))
+    monkeypatch.setattr(settings, "export_dir", str(tmp_path / "exports"))
+    paths = [Path(path) for path in export_raw_details(fmt="json", with_time=False)]
+
+    assert len(paths) == 2
+    combined = json.loads(paths[0].read_text(encoding="utf-8"))
+    details_only = json.loads(paths[1].read_text(encoding="utf-8"))
+    assert paths[0].name.startswith("mubawab_raw_details_export_")
+    assert paths[1].name.startswith("raw_listing_details_")
+    assert len(combined["raw_listing_details"]) == 1
+    assert len(details_only) == 1
+    assert details_only[0]["ad_id"] == "123"
 
 
 def test_city_and_action_aliases_are_generalized() -> None:

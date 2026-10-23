@@ -160,7 +160,7 @@ def export_raw_details(
     *,
     with_time: bool = True,
 ) -> list[str]:
-    """Export raw listing cards and their detail records."""
+    """Export raw listing cards and detail records, plus a detail-only file for JSON."""
     if fmt not in {"csv", "parquet", "json"}:
         raise ValueError(f"Format non supporté: {fmt}")
 
@@ -172,13 +172,23 @@ def export_raw_details(
     stamp = out_dir.name
 
     if fmt == "json":
-        path = out_dir / f"mubawab_raw_details_export_{stamp}.json"
+        combined_path = out_dir / f"mubawab_raw_details_export_{stamp}.json"
+        detail_path = out_dir / f"raw_listing_details_{stamp}.json"
         payload = {
             "raw_listings": listings.to_dict(orient="records"),
             "raw_listing_details": details.to_dict(orient="records"),
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        return [str(path)]
+        combined_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        details.to_json(
+            detail_path,
+            orient="records",
+            force_ascii=False,
+            indent=2,
+        )
+        return [str(combined_path), str(detail_path)]
 
     listings_path = out_dir / f"raw_listings_{stamp}.{fmt}"
     details_path = out_dir / f"raw_listing_details_{stamp}.{fmt}"

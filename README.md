@@ -142,6 +142,17 @@ python -m mubawab_scraper scrape --orchestrator brut --city all --action all --m
 
 The raw orchestrator accepts `--workers 1` or `--workers 2` to scrape city/action
 jobs concurrently. Requests share a rate limiter; the default is one worker.
+To scrape the registered cities from Casablanca through the last city and pages
+1 through 5 (inclusive), use:
+
+```bash
+python -m mubawab_scraper scrape --orchestrator brut --city-range "Casablanca;" --page-range v1:5 --action a-vendre
+```
+
+The city range follows the database's alphabetical city order. An optional end
+city can be supplied after the semicolon, such as `--city-range "Casablanca;Fès"`.
+`--page-range` uses inclusive `vSTART:END` page numbers and overrides
+`--max-pages`; both range options are only available with the raw orchestrator.
 
 Raw listings are stored separately in the `raw_listings` SQLite table and
 automatically exported as CSV and JSON to `data/processed/`. Re-export them
@@ -161,7 +172,9 @@ python -m mubawab_scraper export --details --fmt csv
 
 Successful detail records are stored in `raw_listing_details`, and their
 source cards are marked `detail_scraped=1`. Failed cards remain eligible for
-retry. Detail exports include separate files for raw cards and detail records.
+retry. `export --details` exports the raw cards and detail records. For JSON,
+it writes the existing combined export and a separate array containing only
+`raw_listing_details`.
 Detail pages are loaded with Selenium's eager page-load strategy and committed
 to SQLite as workers finish, while still marking each successful record for
 resume. Detail scraping defaults to one worker and supports a maximum of two;
@@ -219,7 +232,7 @@ Recommended storage pattern:
 You can schedule the scraper with cron:
 
 ```bash
-0 * * * * cd /path/to/mubawab-scraper && python src/main.py >> logs/scraper.log 2>&1
+0 * * * * cd /path/to/mubawab-scraper && mkdir -p logs && python -m mubawab_scraper scrape >> logs/scraper.log 2>&1
 ```
 
 For larger pipelines, use Airflow, Dagster, or Prefect to manage retries, scheduling, and observability.

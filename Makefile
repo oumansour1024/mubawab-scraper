@@ -7,3 +7,4 @@ test:   ; uv run pytest -m "not integration"
 run:    ; uv run mubawab-scrape --city casablanca --property-type appartements
 export: ; uv run mubawab-scrape export --fmt csv
 clean:  ; rm -rf .venv .pytest_cache .ruff_cache .mypy_cache data/processed/*
+

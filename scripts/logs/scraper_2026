@@ -1,0 +1,5 @@
+Usage: mubawab-scraper-cli details [OPTIONS]
+Try 'mubawab-scraper-cli details --help' for help.
++- Error ---------------------------------------------------------------------+
+| Got unexpected extra argument(s) (1Mo.log)                                  |
++-----------------------------------------------------------------------------+

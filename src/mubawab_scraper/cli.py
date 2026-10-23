@@ -13,6 +13,23 @@ from mubawab_scraper.pipeline.orchestrator_brut import (
 app = typer.Typer(help="Mubawab scraping pipeline", no_args_is_help=True)
 console = Console()
 
+
+def _parse_page_range(value: str) -> tuple[int, int]:
+    """Parse an inclusive page range such as ``v1:5``."""
+    try:
+        start_text, end_text = value.strip().lower().removeprefix("v").split(":")
+        start, end = int(start_text), int(end_text)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "Format de plage invalide; utilisez v1:5 (pages incluses)"
+        ) from exc
+    if start < 1 or end < start:
+        raise typer.BadParameter(
+            "La plage de pages doit commencer à 1 ou plus et être croissante"
+        )
+    return start, end
+
+
 @app.command()
 def scrape(
     city: str = typer.Option(
@@ -47,10 +64,24 @@ def scrape(
         max=MAX_RAW_WORKERS,
         help="Nombre de tâches ville/action parallèles pour l'orchestrateur brut",
     ),
+    city_range: str | None = typer.Option(
+        None,
+        "--city-range",
+        help="Plage de villes enregistrées, ex. 'Casablanca;' jusqu'à la dernière",
+    ),
+    page_range: str | None = typer.Option(
+        None,
+        "--page-range",
+        help="Plage inclusive de pages pour l'orchestrateur brut, ex. v1:5",
+    ),
 ) -> None:
     """Lance le pipeline complet."""
     setup_logging(settings.log_level)
     if orchestrator == "default":
+        if city_range is not None or page_range is not None:
+            raise typer.BadParameter(
+                "--city-range et --page-range nécessitent --orchestrator brut"
+            )
         if workers != 1:
             raise typer.BadParameter(
                 "--workers > 1 est uniquement pris en charge avec "
@@ -79,6 +110,10 @@ def scrape(
                 f"[red]⚠ {failed_actions} action(s) de scraping en échec[/red]"
             )
     elif orchestrator == "ville":
+        if city_range is not None or page_range is not None:
+            raise typer.BadParameter(
+                "--city-range et --page-range nécessitent --orchestrator brut"
+            )
         if workers != 1:
             raise typer.BadParameter(
                 "--workers > 1 est uniquement pris en charge avec "
@@ -87,7 +122,22 @@ def scrape(
         villes = run_pipeline_ville(city, transaction, headless)
         console.print(f"[green]✓ {len(villes)} villes enregistrées[/green]")
     elif orchestrator == "brut":
-        summaries = run_pipeline_brut(city, transaction, max_pages, workers=workers)
+        parsed_page_range = (
+            _parse_page_range(page_range) if page_range is not None else None
+        )
+        if city_range is None and parsed_page_range is None:
+            summaries = run_pipeline_brut(
+                city, transaction, max_pages, workers=workers
+            )
+        else:
+            summaries = run_pipeline_brut(
+                city,
+                transaction,
+                max_pages,
+                workers=workers,
+                city_range=city_range,
+                page_range=parsed_page_range,
+            )
         total_listings = sum(summary.listings_scraped for summary in summaries)
         for summary in summaries:
             if summary.error:
@@ -114,7 +164,7 @@ def export(
     details: bool = typer.Option(
         False,
         "--details",
-        help="Exporter les annonces brutes avec leurs pages détail",
+        help="Exporter les annonces brutes et leurs détails",
     ),
 ) -> None:
     """Exporte la base vers un fichier plat."""
@@ -167,8 +217,8 @@ def details(
     workers: int = typer.Option(
         1,
         min=1,
-        max=2,
-        help="Nombre de navigateurs parallèles (1 ou 2; limite prudente)",
+        max=4,
+        help="Nombre de navigateurs parallèles (1 ou 4; limite prudente)",
     ),
 ) -> None:
     """Scrape les pages détail des annonces brutes non encore traitées."""
