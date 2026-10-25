@@ -1,11 +1,13 @@
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from mubawab_scraper.models import Ville
 
 SCHEMA = Path(__file__).parent / "schemas.sql"
+
 
 class SQLiteStore:
     def __init__(self, db_path: str) -> None:
@@ -18,28 +20,18 @@ class SQLiteStore:
         self.conn.commit()
 
     def _migrate_villes_schema(self) -> None:
-        columns = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(villes)")
-        }
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(villes)")}
         if "attrNameurl" not in columns:
             self.conn.execute("ALTER TABLE villes ADD COLUMN attrNameurl TEXT")
 
     def _migrate_scraping_metadata_schema(self) -> None:
-        columns = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(scraping_metadata)")
-        }
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(scraping_metadata)")}
         for column in ("total_pages", "total_results", "page_size", "pages_scraped"):
             if column not in columns:
-                self.conn.execute(
-                    f"ALTER TABLE scraping_metadata ADD COLUMN {column} INTEGER"
-                )
+                self.conn.execute(f"ALTER TABLE scraping_metadata ADD COLUMN {column} INTEGER")
 
-    def save_many(self, listings: list[dict]) -> None:
-        ad_listings = [
-            listing
-            for listing in listings
-            if not self._is_city_url(listing.get("url"))
-        ]
+    def save_many(self, listings: list[dict[str, Any]]) -> None:
+        ad_listings = [listing for listing in listings if not self._is_city_url(listing.get("url"))]
         self.conn.executemany(
             """
             INSERT INTO listings

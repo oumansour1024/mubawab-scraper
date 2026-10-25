@@ -1,8 +1,8 @@
-
 import json
 import time
 from pathlib import Path
 from threading import Event
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -36,8 +36,7 @@ DETAIL_READY_SELECTORS = (
 )
 
 RAW_DETAIL_READY_SELECTORS = (
-    "h1.searchTitle, #fullPicturesHeader, div.adMainFeature, "
-    "div.blockProp, div.picturesGallery"
+    "h1.searchTitle, #fullPicturesHeader, div.adMainFeature, div.blockProp, div.picturesGallery"
 )
 
 
@@ -48,7 +47,7 @@ class RateLimitedPageError(RuntimeError):
         super().__init__(f"HTTP 429 received for {url}")
 
 
-def _read_rate_limit_response(driver, url: str) -> tuple[bool, str | None]:
+def _read_rate_limit_response(driver: Any, url: str) -> tuple[bool, str | None]:
     for entry in driver.get_log("performance"):
         try:
             event = json.loads(entry["message"])["message"]
@@ -62,7 +61,7 @@ def _read_rate_limit_response(driver, url: str) -> tuple[bool, str | None]:
                 for name, value in response.get("headers", {}).items()
             }
             return True, headers.get("retry-after")
-        except (KeyError, TypeError, json.JSONDecodeError):
+        except KeyError, TypeError, json.JSONDecodeError:
             continue
     return False, None
 
@@ -87,12 +86,12 @@ def build_raw_detail_url(url: str, ad_id: str) -> str:
 
 
 @selenium_retry
-def _navigate_raw_detail(driver, url: str) -> None:
+def _navigate_raw_detail(driver: Any, url: str) -> None:
     driver.get(url)
 
 
 def scrape_detail(
-    driver,
+    driver: Any,
     url: str,
     ad_id: str,
     rate_limiter: RequestRateLimiter | None = None,
@@ -113,11 +112,7 @@ def scrape_detail(
         _navigate_raw_detail(driver, detail_url)
         rate_limited, retry_after = _read_rate_limit_response(driver, detail_url)
         page_text = driver.page_source[:2000].casefold()
-        if (
-            rate_limited
-            or "too many requests" in page_text
-            or "trop de requêtes" in page_text
-        ):
+        if rate_limited or "too many requests" in page_text or "trop de requêtes" in page_text:
             raise RateLimitedPageError(detail_url, retry_after)
         wait_for_selector(driver, RAW_DETAIL_READY_SELECTORS, timeout=10)
         detail = parse_detail_page(driver.page_source, ad_id, detail_url)
@@ -136,6 +131,7 @@ def scrape_detail(
 
 class EnrichStats:
     """Compteur de progression pour enrich_listings."""
+
     def __init__(self, total: int) -> None:
         self.total = total
         self.ok = 0
@@ -166,10 +162,13 @@ class EnrichStats:
         rate = self.done / self.elapsed
         return (self.total - self.done) / rate if rate else 0.0
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, int | float]:
         return {
-            "ok": self.ok, "skipped": self.skipped, "failed": self.failed,
-            "done": self.done, "total": self.total,
+            "ok": self.ok,
+            "skipped": self.skipped,
+            "failed": self.failed,
+            "done": self.done,
+            "total": self.total,
             "elapsed_s": round(self.elapsed, 1),
             "eta_s": round(self.eta, 1),
         }
@@ -184,7 +183,7 @@ def _is_listing_url(url: str) -> bool:
     return any(f"/fr/{kind}/" in url for kind in ("a", "pa", "p"))
 
 
-def _page_is_404(driver) -> bool:
+def _page_is_404(driver: Any) -> bool:
     """Détecte une page 404 via le titre ou l'URL de redirection."""
     try:
         title = driver.title.lower()
@@ -199,29 +198,27 @@ def _page_is_404(driver) -> bool:
 
 
 @selenium_retry
-def _load_detail_page(driver, url: str, timeout: int = 12) -> str:
+def _load_detail_page(driver: Any, url: str, timeout: int = 12) -> str:
     """
     Charge une page détail et attend qu'un sélecteur clé apparaisse.
     Lève une exception si échec (→ retry via tenacity).
     """
     driver.get(url)
     WebDriverWait(driver, timeout).until(
-        expected_conditions.presence_of_element_located(
-            (By.CSS_SELECTOR, DETAIL_READY_SELECTORS)
-        )
+        expected_conditions.presence_of_element_located((By.CSS_SELECTOR, DETAIL_READY_SELECTORS))
     )
-    return driver.page_source
+    return str(driver.page_source)
 
 
 def enrich_listings(
-    driver,
-    listings: list[dict],
+    driver: Any,
+    listings: list[dict[str, Any]],
     *,
     skip_enriched: bool = True,
     save_errors: bool = True,
     error_dir: str = "data/raw/enrich_errors",
     rate_limit: tuple[float, float] = (1.0, 2.5),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Enrichit chaque annonce avec les données de la page détail.
 
@@ -303,8 +300,11 @@ def enrich_listings(
             lst["_enrich_status"] = "failed"
             stats.tick("failed", url)
             log.warning(
-                "enrich_failed", idx=i, url=url,
-                err_type=type(e).__name__, err=str(e)[:200],
+                "enrich_failed",
+                idx=i,
+                url=url,
+                err_type=type(e).__name__,
+                err=str(e)[:200],
             )
             if save_errors:
                 _dump_error(driver, error_path, lst.get("listing_id"), "exception")
@@ -320,7 +320,7 @@ def enrich_listings(
     return listings
 
 
-def _dump_error(driver, out_dir: Path, listing_id: str | None, kind: str) -> None:
+def _dump_error(driver: Any, out_dir: Path, listing_id: str | None, kind: str) -> None:
     """Sauvegarde le HTML courant pour debug."""
     try:
         name = f"{listing_id or 'unknown'}_{kind}.html"

@@ -1,4 +1,6 @@
 import json
+from contextlib import suppress
+from typing import Any
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -23,7 +25,7 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
     title_el = soup.select_one("h1.searchTitle")
     description_el = soup.select_one("div.blockProp > p")
 
-    general: dict[str, str] = {
+    general: dict[str, Any] = {
         "property_type": "",
         "land_surface_raw": "",
         "condition_raw": "",
@@ -60,7 +62,7 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
         else ""
     )
 
-    composition = {
+    composition: dict[str, Any] = {
         "surface_raw": "",
         "rooms_raw": "",
         "bedrooms_raw": "",
@@ -79,11 +81,7 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
             and not composition["bedrooms_raw"]
         ):
             composition["bedrooms_raw"] = text
-        elif (
-            "salle" in lower_text
-            and "bain" in lower_text
-            and not composition["bathrooms_raw"]
-        ):
+        elif "salle" in lower_text and "bain" in lower_text and not composition["bathrooms_raw"]:
             composition["bathrooms_raw"] = text
 
     price_el = soup.select_one("h3.orangeTit bdi")
@@ -107,10 +105,8 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
     image_count = len(images)
     gallery = soup.select_one("div.flipsnap[numpics]")
     if gallery:
-        try:
+        with suppress(TypeError, ValueError):
             image_count = int(str(gallery.get("numpics")))
-        except (TypeError, ValueError):
-            pass
 
     agency_el = soup.select_one("span.businessName a")
     logo_el = soup.select_one("div.businessInfo img.image")
@@ -119,9 +115,7 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
         ad_id=ad_id,
         url=url,
         title_full=title_el.get_text(strip=True) if title_el else "",
-        description_full=(
-            description_el.get_text("\n", strip=True) if description_el else ""
-        ),
+        description_full=(description_el.get_text("\n", strip=True) if description_el else ""),
         **general,
         latitude=latitude,
         longitude=longitude,
@@ -144,12 +138,11 @@ def parse_detail_page(html: str, ad_id: str, url: str) -> PropertyDetail:
     return detail
 
 
-def parse_detail(soup) -> dict:
-    detail: dict = {}
+def parse_detail(soup: Any) -> dict[str, Any]:
+    """Extract optional normalized detail fields from a parsed HTML document."""
+    detail: dict[str, Any] = {}
 
-    desc = soup.select_one(
-        "div.propertyDescription, div.description, p.listingP.descLi"
-    )
+    desc = soup.select_one("div.propertyDescription, div.description, p.listingP.descLi")
     description_meta = soup.select_one("meta[name='description']")
     detail["description"] = (
         desc.get_text(" ", strip=True)
@@ -159,9 +152,7 @@ def parse_detail(soup) -> dict:
         else None
     )
 
-    agency = soup.select_one(
-        "span.agencyName, div.agency, span.businessName a, span.businessName"
-    )
+    agency = soup.select_one("span.agencyName, div.agency, span.businessName a, span.businessName")
     detail["agency_name"] = agency.get_text(" ", strip=True) if agency else None
 
     map_el = soup.select_one("[data-latitude][data-longitude]")
@@ -169,13 +160,11 @@ def parse_detail(soup) -> dict:
         try:
             detail["latitude"] = float(map_el["data-latitude"])
             detail["longitude"] = float(map_el["data-longitude"])
-        except (ValueError, KeyError):
+        except ValueError, KeyError:
             pass
 
     detail["amenities"] = [
         el.get_text(strip=True)
-        for el in soup.select(
-            "ul.amenities li, div.features span, div.adFeature span.fSize11"
-        )
+        for el in soup.select("ul.amenities li, div.features span, div.adFeature span.fSize11")
     ]
     return detail

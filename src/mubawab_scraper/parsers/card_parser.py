@@ -1,10 +1,12 @@
+from typing import Any
+
 from mubawab_scraper.parsers.helpers import (
     extract_id_from_url,
     extract_number,
     extract_price,
 )
 
-FEATURE_FIELDS = {
+FEATURE_FIELDS: dict[str, str] = {
     "icon-triangle": "area_sqm",
     "icon-house-boxes": "rooms",
     "icon-bed": "bedrooms",
@@ -12,7 +14,8 @@ FEATURE_FIELDS = {
 }
 
 
-def parse_listing_card(card) -> dict | None:
+def parse_listing_card(card: Any) -> dict[str, Any] | None:
+    """Parse one listing card into the normalized listing representation."""
     try:
         id_element = card.select_one("input.adId")
         title_element = card.select_one("h2.listingTit a, h2.title")
@@ -46,8 +49,11 @@ def parse_listing_card(card) -> dict | None:
             if not icon or not value:
                 continue
             field = next(
-                (field for icon_class, field in FEATURE_FIELDS.items()
-                 if icon_class in icon.get("class", [])),
+                (
+                    field
+                    for icon_class, field in FEATURE_FIELDS.items()
+                    if icon_class in icon.get("class", [])
+                ),
                 None,
             )
             if field:
@@ -69,5 +75,5 @@ def parse_listing_card(card) -> dict | None:
             listing["image_url"] = image.get("data-lazy") or image.get("src")
 
         return listing
-    except (AttributeError, KeyError, TypeError, ValueError):
+    except AttributeError, KeyError, TypeError, ValueError:
         return None

@@ -4,22 +4,16 @@ from mubawab_scraper.parsers.card_parser_brut import (
     extract_raw_fields,
     parse_page as _parse_page,
 )
+from mubawab_scraper.application.services.transaction_normalization import (
+    RAW_ACTION_ALIASES as TRANSACTION_ALIASES,
+    normalize_scrape_action,
+)
 from mubawab_scraper.pipeline.orchestrator_brut import run_pipeline
 from mubawab_scraper.scrapers.search_brut import (
     build_page_url,
     fetch,
     scrape_search_pages,
 )
-from mubawab_scraper.utils.urls import ACTION_ALIASES, normalize_city_action
-
-TRANSACTION_ALIASES = {
-    **ACTION_ALIASES,
-    "vente": "a-vendre",
-    "location": "a-louer",
-    "vacances": "vacational",
-}
-
-
 def parse_page(
     html: str,
     transaction_type: str,
@@ -36,10 +30,7 @@ def scrape_transaction(
     max_pages: int | None = None,
 ) -> list[dict[str, str | bool]]:
     """Fetch raw listings for one transaction and city."""
-    action = TRANSACTION_ALIASES.get(
-        transaction_type.strip().lower(), transaction_type.strip().lower()
-    )
-    action = normalize_city_action(action)
+    action = normalize_scrape_action(transaction_type)
     return scrape_search_pages(
         city_slug=city,
         transaction_type=action,

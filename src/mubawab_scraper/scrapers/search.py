@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException, WebDriverException
@@ -14,23 +15,24 @@ log = get_logger(__name__)
 
 
 @selenium_retry
-def _navigate_to_search_page(driver, url: str) -> None:
+def _navigate_to_search_page(driver: Any, url: str) -> None:
     driver.get(url)
 
 
 @dataclass
 class SearchScrapeResult:
-    listings: list[dict]
+    listings: list[dict[str, Any]]
     total_pages: int
     total_results: int
     page_size: int
     pages_scraped: int
 
 
-def scrape_search_pages(
-    driver, base_url: str, max_pages: int = 10
-) -> SearchScrapeResult:
-    all_listings: list[dict] = []
+def scrape_search_pages(driver: Any, base_url: str, max_pages: int = 10) -> SearchScrapeResult:
+    """Scrape normalized listing cards from the paginated Selenium result."""
+    if max_pages < 0:
+        raise ValueError("max_pages must be zero (unlimited) or a positive integer")
+    all_listings: list[dict[str, Any]] = []
     seen_listings: set[str] = set()
     total_pages = 0
     total_results = 0

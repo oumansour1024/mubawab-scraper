@@ -17,14 +17,14 @@ Deux stratégies de rotation sont disponibles :
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
 import logging.handlers
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 import structlog
-
+from structlog.types import Processor
 
 # --------------------------------------------------------------------------- #
 # Constantes
@@ -32,16 +32,17 @@ import structlog
 
 _LEVELS: dict[str, int] = {
     "CRITICAL": logging.CRITICAL,
-    "ERROR":    logging.ERROR,
-    "WARNING":  logging.WARNING,
-    "INFO":     logging.INFO,
-    "DEBUG":    logging.DEBUG,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
 }
 
 
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
 
 def _resolve_level(level: str | int) -> int:
     """
@@ -56,8 +57,7 @@ def _resolve_level(level: str | int) -> int:
         return _LEVELS[level.upper()]
     except KeyError as exc:
         raise ValueError(
-            f"Niveau de log inconnu: {level!r}. "
-            f"Attendu: {', '.join(_LEVELS)}."
+            f"Niveau de log inconnu: {level!r}. Attendu: {', '.join(_LEVELS)}."
         ) from exc
 
 
@@ -65,7 +65,7 @@ def _build_file_handler(
     log_dir: Path,
     *,
     rotation: str = "size",
-    max_bytes: int = 10 * 1024 * 1024,   # 10 Mo
+    max_bytes: int = 10 * 1024 * 1024,  # 10 Mo
     backup_count: int = 7,
     filename: str | None = None,
 ) -> logging.Handler:
@@ -84,7 +84,7 @@ def _build_file_handler(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     if filename is None:
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        stamp = datetime.now(UTC).strftime("%Y-%m-%d")
         filename = f"mubawab_{stamp}.log"
 
     path = log_dir / filename
@@ -109,9 +109,7 @@ def _build_file_handler(
         # Suffixe des anciens fichiers : mubawab.log.2026-10-13
         handler.suffix = "%Y-%m-%d"
     else:
-        raise ValueError(
-            f"Rotation inconnue: {rotation!r}. Attendu: 'size' ou 'time'."
-        )
+        raise ValueError(f"Rotation inconnue: {rotation!r}. Attendu: 'size' ou 'time'.")
 
     return handler
 
@@ -119,6 +117,7 @@ def _build_file_handler(
 # --------------------------------------------------------------------------- #
 # API publique
 # --------------------------------------------------------------------------- #
+
 
 def setup_logging(
     level: str | int = "INFO",
@@ -152,16 +151,14 @@ def setup_logging(
     # ------------------------------------------------------------------ #
     # 1. Pipeline structlog (commun aux deux sorties)
     # ------------------------------------------------------------------ #
-    shared_processors: list = [
+    shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
     if include_timestamp:
-        shared_processors.insert(
-            1, structlog.processors.TimeStamper(fmt="iso", utc=True)
-        )
+        shared_processors.insert(1, structlog.processors.TimeStamper(fmt="iso", utc=True))
 
     renderer = (
         structlog.processors.JSONRenderer()
@@ -219,7 +216,7 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     :param name: Nom du logger (typiquement ``__name__``).
     :return: Logger structlog prêt à l'emploi.
     """
-    return structlog.get_logger(name)
+    return structlog.get_logger(name)  # type: ignore[no-any-return]
 
 
 # --------------------------------------------------------------------------- #
@@ -228,9 +225,9 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
 if __name__ == "__main__":
     setup_logging(
         "DEBUG",
-        log_dir="./logs",          # ← stockage activé
+        log_dir="./logs",  # ← stockage activé
         rotation="size",
-        max_bytes=1_000_000,       # 1 Mo (pour tester la rotation)
+        max_bytes=1_000_000,  # 1 Mo (pour tester la rotation)
         backup_count=3,
         console=True,
     )
@@ -240,6 +237,6 @@ if __name__ == "__main__":
     for i in range(5):
         log.debug("tick", i=i)
     try:
-        1 / 0
+        raise ZeroDivisionError
     except ZeroDivisionError:
         log.exception("boom")

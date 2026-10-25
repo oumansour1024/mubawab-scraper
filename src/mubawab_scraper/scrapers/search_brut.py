@@ -52,7 +52,7 @@ def _rate_limit_delay(retry_after: str | None, attempt: int) -> float:
                     0.0,
                     (retry_at - datetime.now(UTC)).total_seconds(),
                 )
-            except (TypeError, ValueError, OverflowError):
+            except TypeError, ValueError, OverflowError:
                 pass
     return float(min(5 * (2**attempt), 60))
 
@@ -124,15 +124,18 @@ def scrape_search_pages(
     page_range: tuple[int, int] | None = None,
 ) -> RawSearchResult:
     """Scrape raw listings for a city/action; zero pages means no page limit."""
-    page_limit = settings.max_pages if max_pages is None else max_pages
+    page_limit: int = int(settings.max_pages if max_pages is None else max_pages)
     if page_limit < 0:
         raise ValueError("max_pages must be zero (unlimited) or a positive integer")
+    page_end: int | None = None
+    progress_total: int | None
     if page_range is not None:
-        page_start, page_end = page_range
-        if page_start < 1 or page_end < page_start:
+        page_start, range_end = page_range
+        if range_end < page_start or page_start < 1:
             raise ValueError("page_range must contain positive pages in ascending order")
-        page_numbers = iter(range(page_start, page_end + 1))
-        progress_total = page_end - page_start + 1
+        page_end = range_end
+        page_numbers = iter(range(page_start, range_end + 1))
+        progress_total = range_end - page_start + 1
     else:
         page_end = page_limit
         page_numbers = _pages(page_limit)
@@ -204,11 +207,15 @@ def scrape_search_pages(
                 listings=len(rows),
                 total=len(listings),
             )
-            before_page_limit = page < page_end if page_range is not None else (
-                page_limit == 0 or page < page_limit
+            before_page_limit = (
+                page_end is not None and page < page_end
+                if page_range is not None
+                else (page_limit == 0 or page < page_limit)
             )
-            if rate_limiter is None and before_page_limit and (
-                not discovered_total_pages or page < discovered_total_pages
+            if (
+                rate_limiter is None
+                and before_page_limit
+                and (not discovered_total_pages or page < discovered_total_pages)
             ):
                 jittered_sleep()
             if discovered_total_pages and page >= discovered_total_pages:

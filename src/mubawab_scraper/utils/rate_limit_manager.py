@@ -2,13 +2,13 @@
 Gestion centralisée du rate limiting Mubawab.
 Persiste l'état sur disque pour survivre aux redémarrages.
 """
+
 import json
-import os
-import time
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from mubawab_scraper.config import settings
 
@@ -20,7 +20,7 @@ STATE_FILE = Path("data/.rate_limit_state.json")
 class RateLimitManager:
     """
     Gère le rate limiting avec persistance.
-    
+
     Fonctionnalités :
     - Lecture des headers Retry-After (int ou HTTP-date)
     - Backoff exponentiel si pas de header
@@ -28,11 +28,12 @@ class RateLimitManager:
     - Escalade automatique si 429 répétés
     """
 
-    def __init__(self, state_file: Path = STATE_FILE):
+    def __init__(self, state_file: Path = STATE_FILE) -> None:
         self.state_file = state_file
         self.state = self._load_state()
-        self.consecutive_429 = self.state.get("consecutive_429", 0)
-        self.last_429_at: Optional[datetime] = None
+        consecutive_429 = self.state.get("consecutive_429", 0)
+        self.consecutive_429 = consecutive_429 if isinstance(consecutive_429, int) else 0
+        self.last_429_at: datetime | None = None
 
         # Si on est encore dans une période de blocage, on attend
         self._check_pending_block()
@@ -40,22 +41,27 @@ class RateLimitManager:
     # ─────────────────────────────────────────────
     # PERSISTANCE
     # ─────────────────────────────────────────────
-    def _load_state(self) -> dict:
+    def _load_state(self) -> dict[str, Any]:
         if self.state_file.exists():
             try:
-                return json.loads(self.state_file.read_text())
-            except Exception:
-                pass
+                state = json.loads(self.state_file.read_text())
+                if isinstance(state, dict):
+                    return state
+            except OSError, json.JSONDecodeError:
+                log.warning(
+                    "rate_limit_state_load_failed",
+                    extra={"path": str(self.state_file)},
+                )
         return {}
 
-    def _save_state(self):
+    def _save_state(self) -> None:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.state_file.write_text(json.dumps(self.state, indent=2))
 
     # ─────────────────────────────────────────────
     # VÉRIFICATION AU DÉMARRAGE
     # ─────────────────────────────────────────────
-    def _check_pending_block(self):
+    def _check_pending_block(self) -> None:
         """Si un blocage est encore actif, attend automatiquement."""
         until_str = self.state.get("block_until")
         if not until_str:
@@ -65,10 +71,7 @@ class RateLimitManager:
         remaining = (until - datetime.utcnow()).total_seconds()
 
         if remaining > 0:
-            log.warning(
-                f"🚫 Blocage actif encore {remaining:.0f}s "
-                f"(jusqu'à {until.isoformat()})"
-            )
+            log.warning(f"🚫 Blocage actif encore {remaining:.0f}s (jusqu'à {until.isoformat()})")
             self._interruptible_sleep(remaining)
         else:
             # Blocage expiré, on nettoie
@@ -78,7 +81,7 @@ class RateLimitManager:
     # ─────────────────────────────────────────────
     # DÉTECTION 429
     # ─────────────────────────────────────────────
-    def check_response(self, status_code: int, headers: dict) -> bool:
+    def check_response(self, status_code: int, headers: dict[str, Any]) -> bool:
         """
         Analyse la réponse HTTP.
         Retourne True si rate limited, False sinon.
@@ -104,19 +107,19 @@ class RateLimitManager:
             # 3 fois de suite → doublement punitif
             retry_after = max(retry_after, 3600 * 6)  # 6h minimum
             log.error(
-                f"🚨 3 × 429 consécutifs → blocage renforcé {retry_after}s"
+                f"🚨 3 x 429 consécutifs → blocage renforcé {retry_after}s"
             )
 
         # Appliquer le blocage
         self._apply_block(retry_after)
         return True
 
-    def _parse_retry_after(self, headers: dict) -> int:
+    def _parse_retry_after(self, headers: dict[str, Any]) -> int:
         """Parse Retry-After (int en secondes OU HTTP-date)."""
         raw = headers.get("Retry-After") or headers.get("retry-after")
         if not raw:
             # Pas de header → backoff exponentiel
-            backoff = min(300 * (2 ** self.consecutive_429), 7200)
+            backoff: int = min(300 * (2**self.consecutive_429), 7200)
             log.warning(f"⚠️ 429 sans Retry-After → backoff {backoff}s")
             return backoff
 
@@ -129,18 +132,19 @@ class RateLimitManager:
         # Cas 2 : HTTP-date (RFC 7231)
         try:
             from email.utils import parsedate_to_datetime
+
             target = parsedate_to_datetime(raw)
             now = datetime.now(target.tzinfo)
             delta = (target - now).total_seconds()
             return max(int(delta), 60)
-        except Exception:
+        except TypeError, ValueError, OverflowError:
             log.warning(f"⚠️ Retry-After illisible: {raw}")
             return 300
 
     # ─────────────────────────────────────────────
     # APPLICATION DU BLOCAGE
     # ─────────────────────────────────────────────
-    def _apply_block(self, seconds: int):
+    def _apply_block(self, seconds: int) -> None:
         """Enregistre le blocage et attend."""
         # Ajouter marge de sécurité (+10% + 60s)
         wait = int(seconds * 1.1 + 60)
@@ -152,18 +156,17 @@ class RateLimitManager:
         self._save_state()
 
         log.warning(
-            f"⏸️  Rate limit → attente {wait}s "
-            f"({wait/60:.1f} min) jusqu'à {until.isoformat()}"
+            f"⏸️  Rate limit → attente {wait}s ({wait / 60:.1f} min) jusqu'à {until.isoformat()}"
         )
 
         self._interruptible_sleep(wait)
 
-    def _interruptible_sleep(self, seconds: int):
+    def _interruptible_sleep(self, seconds: float) -> None:
         """
         Dort en affichant la progression (Ctrl+C possible).
         Si Ctrl+C → sauvegarde l'état pour reprise.
         """
-        from rich.progress import Progress, TimeRemainingColumn
+        from rich.progress import Progress
 
         try:
             with Progress() as progress:
@@ -171,7 +174,7 @@ class RateLimitManager:
                     "[yellow]⏸️  Attente post-429...",
                     total=seconds,
                 )
-                for _ in range(seconds):
+                for _ in range(max(0, int(seconds))):
                     time.sleep(1)
                     progress.update(task, advance=1)
         except KeyboardInterrupt:
@@ -182,15 +185,14 @@ class RateLimitManager:
     # ─────────────────────────────────────────────
     # DÉLAI ENTRE REQUÊTES (jitter)
     # ─────────────────────────────────────────────
-    def polite_delay(self):
+    def polite_delay(self) -> None:
         """Délai entre deux requêtes (avec jitter)."""
         import random
-        delay = random.uniform(
-            settings.min_delay, settings.max_delay
-        )
+
+        delay = random.uniform(settings.min_delay, settings.max_delay)
         time.sleep(delay)
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset manuel de l'état."""
         self.state = {}
         self.consecutive_429 = 0

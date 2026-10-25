@@ -1,9 +1,11 @@
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.remote.webdriver import WebDriver
 from webdriver_manager.chrome import ChromeDriverManager
 
 from mubawab_scraper.config import settings
@@ -27,12 +29,13 @@ def _options(headless: bool, *, performance_logging: bool = False) -> Options:
     )
     return o
 
+
 @contextmanager
 def chrome_driver(
     headless: bool | None = None,
     *,
     performance_logging: bool = False,
-):
+) -> Iterator[WebDriver]:
     """Context manager to create and manage a Selenium Chrome WebDriver instance."""
     system_driver = Path("/usr/bin/chromedriver")
     system_browser = Path("/usr/bin/chromium")
@@ -51,9 +54,7 @@ def chrome_driver(
         service=service,
         options=options,
     )
-    driver.execute_script(
-        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
-    )
+    driver.execute_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
     try:
         yield driver
     finally:

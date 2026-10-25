@@ -9,6 +9,11 @@ from time import monotonic
 from tqdm import tqdm
 
 from mubawab_scraper.browser.driver import chrome_driver
+from mubawab_scraper.application.services.transaction_normalization import (
+    DETAIL_ACTION_ALIASES,
+    DETAIL_ACTIONS,
+    normalize_detail_transaction,
+)
 from mubawab_scraper.config import settings
 from mubawab_scraper.logging_config import get_logger
 from mubawab_scraper.models import PropertyDetail
@@ -22,12 +27,6 @@ log = get_logger(__name__)
 MAX_DETAIL_WORKERS = 4
 DETAIL_DB_BATCH_SIZE = 20
 
-DETAIL_ACTION_ALIASES = {
-    **ACTION_ALIASES,
-    "vente": "a-vendre",
-    "location": "a-louer",
-    "vacances": "vacational",
-}
 DETAIL_STORAGE_ACTIONS = {
     "a-vendre": ("a-vendre", "a-vendre-all", "vente"),
     "a-louer": ("a-louer", "a-louer-all", "location"),
@@ -55,15 +54,7 @@ class _WorkerResult:
 
 
 def _normalize_transaction(transaction_type: str | None) -> str | None:
-    if not transaction_type or transaction_type.strip().lower() == "all":
-        return None
-    normalized = transaction_type.strip().lower()
-    normalized = DETAIL_ACTION_ALIASES.get(normalized, normalized)
-    if normalized not in {"a-vendre", "a-louer", "vacational"}:
-        raise ValueError(
-            "transaction_type must be a-vendre, a-louer, vacational, or all"
-        )
-    return normalized
+    return normalize_detail_transaction(transaction_type)
 
 
 def _detail_worker(

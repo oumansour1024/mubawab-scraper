@@ -4,6 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from mubawab_scraper.config import settings
+from mubawab_scraper.application.services.city_resolution import (
+    resolve_cities,
+    resolve_city_range,
+)
+from mubawab_scraper.application.services.transaction_normalization import (
+    RAW_ACTION_ALIASES,
+    normalize_scrape_action,
+)
 from mubawab_scraper.logging_config import get_logger
 from mubawab_scraper.scrapers.search_brut import RawSearchResult, scrape_search_pages
 from mubawab_scraper.storage.csv_store import export_raw_bundle
@@ -20,14 +28,6 @@ log = get_logger(__name__)
 
 MAX_RAW_WORKERS = 2
 
-RAW_ACTION_ALIASES = {
-    **ACTION_ALIASES,
-    "vente": "a-vendre",
-    "location": "a-louer",
-    "vacances": "vacational",
-}
-
-
 @dataclass
 class RawScrapeSummary:
     city: str
@@ -38,74 +38,21 @@ class RawScrapeSummary:
 
 
 def _normalize_action(action: str) -> str:
-    normalized = action.strip().lower()
-    normalized = RAW_ACTION_ALIASES.get(normalized, normalized)
-    return normalize_city_action(normalized)
+    return normalize_scrape_action(action)
 
 
 def _resolve_cities(
     city: str,
     registered_cities: list[dict[str, str | None]],
 ) -> list[tuple[str, str]]:
-    if city.strip().lower() == "all":
-        city_targets = [
-            (
-                item.get("name") or item.get("attrNameurl") or "",
-                item.get("attrNameurl") or item.get("name") or "",
-            )
-            for item in registered_cities
-        ]
-        city_targets = [(name, slug) for name, slug in city_targets if slug]
-        if not city_targets:
-            raise ValueError(
-                "Aucune ville enregistrée. Exécutez d'abord le scraper des villes."
-            )
-        return city_targets
-
-    matching_city = next(
-        (
-            item
-            for item in registered_cities
-            if (item.get("attrNameurl") or "").casefold() == city.casefold()
-            or (item.get("name") or "").casefold() == city.casefold()
-        ),
-        None,
-    )
-    if matching_city:
-        return [
-            (
-                matching_city.get("name") or city,
-                matching_city.get("attrNameurl") or city,
-            )
-        ]
-    return [(city, city)]
+    return resolve_cities(city, registered_cities)
 
 
 def _resolve_city_range(
     city_range: str,
     registered_cities: list[dict[str, str | None]],
 ) -> list[tuple[str, str]]:
-    parts = city_range.split(";")
-    if len(parts) != 2 or not parts[0].strip():
-        raise ValueError("city_range doit suivre le format 'VilleDépart;VilleFin'")
-
-    city_targets = _resolve_cities("all", registered_cities)
-
-    def find_city_index(name: str) -> int:
-        for index, (city_name, city_slug) in enumerate(city_targets):
-            if name.casefold() in {city_name.casefold(), city_slug.casefold()}:
-                return index
-        raise ValueError(f"Ville non enregistrée dans la plage: {name}")
-
-    start_index = find_city_index(parts[0].strip())
-    end_index = (
-        find_city_index(parts[1].strip())
-        if parts[1].strip()
-        else len(city_targets) - 1
-    )
-    if end_index < start_index:
-        raise ValueError("La ville de fin doit suivre la ville de départ")
-    return city_targets[start_index : end_index + 1]
+    return resolve_city_range(city_range, registered_cities)
 
 
 def run_pipeline(

@@ -1,8 +1,8 @@
 import re
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 from bs4 import BeautifulSoup
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from mubawab_scraper.browser.waits import wait_for_id
@@ -34,6 +34,7 @@ def _extract_city_name(url: str, text: str) -> str:
 
     return text_name
 
+
 def extract_city_attr_name_from_url(url: str) -> str | None:
     try:
         segments = [segment for segment in urlparse(url).path.split("/") if segment]
@@ -58,17 +59,18 @@ def parse_footer_listing_links(html: str) -> list[Ville]:
     seen: set[tuple[str, str, str]] = set()
 
     for link in footer.select("a[href]"):
-        url = (link.get("href") or "").strip()
+        href = link.get("href")
+        url = href.strip() if isinstance(href, str) else ""
         if not url or url.startswith("javascript:"):
             continue
 
         city_name = _extract_city_name(url, link.get_text(" ", strip=True))
-        attrNameurl = extract_city_attr_name_from_url(url)
+        attr_name_url = extract_city_attr_name_from_url(url)
         if not city_name:
             continue
 
-        entry = Ville(name=city_name, url=url, link=url,attrNameurl=attrNameurl)
-        key = (city_name, url, attrNameurl)
+        entry = Ville(name=city_name, url=url, link=url, attrNameurl=attr_name_url)
+        key = (city_name, url, attr_name_url or "")
         if key in seen:
             continue
         seen.add(key)
@@ -77,7 +79,7 @@ def parse_footer_listing_links(html: str) -> list[Ville]:
     return cities
 
 
-def get_url_ville(driver, base_url: str, max_pages: int = 1) -> list[Ville]:
+def get_url_ville(driver: Any, base_url: str, max_pages: int = 1) -> list[Ville]:
     all_cities: list[Ville] = []
 
     driver.get(base_url)

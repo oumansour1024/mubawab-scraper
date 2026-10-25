@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -18,7 +19,7 @@ class PaginationInfo:
         return self.current_page < self.last_page
 
 
-def parse_pagination(soup, slug: str) -> PaginationInfo | None:
+def parse_pagination(soup: Any, slug: str) -> PaginationInfo | None:
     """Extrait les métadonnées de pagination depuis le bloc #ads."""
 
     def _val(elem_id: str) -> str | None:
@@ -28,7 +29,7 @@ def parse_pagination(soup, slug: str) -> PaginationInfo | None:
     def _to_int(v: str | None, default: int = 0) -> int:
         try:
             return int(v) if v else default
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return default
 
     current_page = _to_int(_val("currentPage"), 1)
