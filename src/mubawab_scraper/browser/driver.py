@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -33,12 +34,22 @@ def chrome_driver(
     performance_logging: bool = False,
 ):
     """Context manager to create and manage a Selenium Chrome WebDriver instance."""
+    system_driver = Path("/usr/bin/chromedriver")
+    system_browser = Path("/usr/bin/chromium")
+    service = (
+        Service(str(system_driver))
+        if system_driver.is_file()
+        else Service(ChromeDriverManager().install())
+    )
+    options = _options(
+        settings.headless if headless is None else headless,
+        performance_logging=performance_logging,
+    )
+    if system_browser.is_file():
+        options.binary_location = str(system_browser)
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=_options(
-            settings.headless if headless is None else headless,
-            performance_logging=performance_logging,
-        ),
+        service=service,
+        options=options,
     )
     driver.execute_script(
         "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
